@@ -24,6 +24,10 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {'xlsx'}
 
+# 定义复制的列范围 (E列到Z列，对应5到26列)
+START_COLUMN = 5    # E列
+END_COLUMN = 26     # Z列
+
 # --------------------------- Excel处理函数 ---------------------------
 def try_parse_date(date_str):
     """尝试解析日期字符串"""
@@ -227,22 +231,20 @@ def upload_files():
                 source_ws = source_wb.active
                 
                 logger.info(f"\n处理源文件 {file_index}/{len(source_paths)}: {source_filename}")
+                logger.info(f"复制列范围: {chr(64 + START_COLUMN)}列到{chr(64 + END_COLUMN)}列")
                 
-                # 复制E列 (第5列)
-                copied_rows = copy_entire_column(source_ws, template_ws, 5)
-                logger.info(f"  复制E列数据: {copied_rows} 行")
+                # 循环复制E列到Z列 (5到26列)
+                total_copied = 0
+                for col_index in range(START_COLUMN, END_COLUMN + 1):
+                    col_name = chr(64 + col_index)
+                    copied_rows = copy_entire_column(source_ws, template_ws, col_index)
+                    total_copied += copied_rows
+                    logger.debug(f"  复制{col_name}列数据: {copied_rows} 行")
                 
-                # 复制F列 (第6列)
-                copied_rows = copy_entire_column(source_ws, template_ws, 6)
-                logger.info(f"  复制F列数据: {copied_rows} 行")
-                
-                # 复制G列 (第7列)
-                copied_rows = copy_entire_column(source_ws, template_ws, 7)
-                logger.info(f"  复制G列数据: {copied_rows} 行")
+                logger.info(f"  成功处理源文件: {source_filename} (共复制 {total_copied} 个单元格)")
                 
                 # 关闭源文件
                 source_wb.close()
-                logger.info(f"  成功处理源文件: {source_filename} (后处理文件将覆盖此文件数据)")
                 
             except Exception as e:
                 logger.error(f"处理源文件 {source_filename} 失败: {str(e)}", exc_info=True)
