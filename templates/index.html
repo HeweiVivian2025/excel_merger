@@ -1,94 +1,151 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Excel 合并工具</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 40px auto;
-            padding: 20px;
-            background-color: #f5f5f5;
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background-color: #f5f5f5; 
+            line-height: 1.6;
         }
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        .container { 
+            background: white; 
+            padding: 30px; 
+            border-radius: 10px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
         }
-        h1 {
+        h1 { 
+            color: #333; 
+            text-align: center; 
+            margin-bottom: 30px; 
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .form-group { 
+            margin-bottom: 25px; 
+        }
+        label { 
+            display: block; 
+            margin-bottom: 8px; 
+            font-weight: bold; 
+            color: #555; 
+        }
+        input[type="file"] { 
+            width: 100%; 
+            padding: 10px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            background-color: #f9f9f9;
+        }
+        button { 
+            background-color: #007bff; 
+            color: white; 
+            padding: 12px 30px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            display: block; 
+            margin: 30px auto; 
+            transition: background-color 0.3s;
+        }
+        button:hover { 
+            background-color: #0056b3; 
+        }
+        .status { 
+            margin-top: 20px; 
+            text-align: center; 
+            font-size: 18px; 
+            color: #28a745; 
+            padding: 15px;
+            border-radius: 4px;
+            background-color: #f8fff8;
+            border: 1px solid #c3e6c3;
+        }
+        .error { 
+            color: #dc3545; 
+            background-color: #fff8f8;
+            border: 1px solid #ffe3e3;
+        }
+        .instructions {
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin-bottom: 30px;
+            border-radius: 0 4px 4px 0;
+        }
+        .instructions h2 {
+            margin-top: 0;
             color: #333;
-            text-align: center;
+            font-size: 18px;
+            margin-bottom: 10px;
         }
-        .form-group {
-            margin-bottom: 20px;
+        .instructions ul {
+            margin: 0;
+            padding-left: 20px;
         }
-        label {
-            display: block;
+        .instructions li {
             margin-bottom: 8px;
-            font-weight: bold;
             color: #555;
         }
-        input[type="file"] {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background-color: #007bff;
-            color: white;
-            padding: 12px 30px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            display: block;
-            margin: 20px auto;
-        }
-        button:hover {
-            background-color: #0056b3;
-        }
-        .status {
-            margin-top: 20px;
-            text-align: center;
-            font-size: 18px;
-            color: #28a745;
-        }
-        .error {
-            color: #dc3545;
+        .note {
+            color: #6c757d;
+            font-size: 14px;
+            margin-top: 5px;
+            font-style: italic;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Excel 合并工具</h1>
-        <form id="uploadForm" enctype="multipart/form-data">
+        
+        <div class="instructions">
+            <h2>功能说明与使用注意事项</h2>
+            <ul>
+                <li><strong>合并范围</strong>：系统将自动合并Excel文件中的 <strong>E列至Z列（5到26列）</strong> 数据，其他列数据保持不变。</li>
+                <li><strong>文件格式要求</strong>：输入的源文件必须与模板文件具有 <strong>相同的工作表结构</strong>（工作表名称需匹配）和 <strong>相同的数据列布局</strong>。</li>
+                <li><strong>覆盖规则</strong>：多个源文件将按上传顺序依次处理，后上传文件的数据将 <strong>覆盖</strong> 先上传文件的对应位置数据。</li>
+                <li><strong>合并单元格</strong>：系统支持处理合并单元格，但会自动解除目标单元格的合并状态以确保数据正确写入。</li>
+            </ul>
+            <p class="note">提示：请确保所有Excel文件均为.xlsx格式，且文件大小不超过100MB。</p>
+        </div>
+        
+        <form id="uploadForm">
             <div class="form-group">
                 <label for="template">选择模板文件（.xlsx）</label>
                 <input type="file" id="template" name="template" accept=".xlsx" required>
             </div>
+            
             <div class="form-group">
-                <label for="sources">选择源文件（可多选）</label>
+                <label for="sources">选择源文件（可多选，.xlsx）</label>
                 <input type="file" id="sources" name="sources" accept=".xlsx" multiple required>
             </div>
+            
             <button type="submit">上传并合并</button>
         </form>
-        <div id="status" class="status"></div>
+        
+        <div id="status" class="status" style="display: none;"></div>
     </div>
- 
+
     <script>
         document.getElementById('uploadForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const form = e.target;
             const formData = new FormData(form);
             const statusDiv = document.getElementById('status');
+            
+            // 显示状态
             statusDiv.textContent = '正在上传并合并...';
             statusDiv.className = 'status';
-
-            // 使用 fetch 上传，但手动处理响应
+            statusDiv.style.display = 'block';
+            
+            // 发送请求
             fetch('/upload', {
                 method: 'POST',
                 body: formData
@@ -99,30 +156,27 @@
                         throw new Error(data.error || '未知错误');
                     });
                 }
-
-                // 关键：把响应转为 Blob（二进制文件）
                 return response.blob();
             })
             .then(blob => {
-                // 创建临时 URL
+                // 处理下载
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'merged_output.xlsx';  // 设置下载文件名
+                a.download = 'merged_output.xlsx';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 window.URL.revokeObjectURL(url);
-
-                statusDiv.textContent = '✅ 文件已下载！';
+                
+                statusDiv.textContent = '✅ 文件已成功合并并下载！';
             })
             .catch(error => {
                 console.error('上传失败:', error);
-                statusDiv.textContent = '❌ 上传失败: ' + error.message;
+                statusDiv.textContent = '❌ ' + error.message;
                 statusDiv.className = 'status error';
             });
         });
     </script>
-
 </body>
 </html>

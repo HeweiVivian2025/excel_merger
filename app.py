@@ -46,23 +46,29 @@ def try_parse_date(date_str):
             continue
     return None
 
-def find_sheet_by_name(workbook, target_name):
-    """通过名称模糊查找工作表"""
-    target_pattern = re.compile(r'\s*'.join(re.escape(part) for part in target_name.split()), re.IGNORECASE)
+def find_matching_sheets(template_wb, source_wb):
+    """
+    查找模板和源文件中名称匹配的工作表对
     
-    # 精确匹配
-    clean_target = re.sub(r'\s+', '', target_name).lower()
-    for sheet_name in workbook.sheetnames:
-        clean_name = re.sub(r'\s+', '', sheet_name).lower()
-        if clean_name == clean_target:
-            return workbook[sheet_name]
+    :return: 匹配的工作表对列表 [(template_ws, source_ws), ...]
+    """
+    matches = []
     
-    # 模糊匹配
-    for sheet_name in workbook.sheetnames:
-        if target_pattern.search(sheet_name):
-            return workbook[sheet_name]
+    # 提取模板和源文件的工作表名称
+    template_sheets = {re.sub(r'\s+', '', name).lower(): name for name in template_wb.sheetnames}
+    source_sheets = {re.sub(r'\s+', '', name).lower(): name for name in source_wb.sheetnames}
     
-    return None
+    # 查找匹配的工作表
+    for clean_template_name, template_name in template_sheets.items():
+        for clean_source_name, source_name in source_sheets.items():
+            if clean_template_name == clean_source_name:
+                template_ws = template_wb[template_name]
+                source_ws = source_wb[source_name]
+                matches.append((template_ws, source_ws, template_name))
+                logger.info(f"找到匹配工作表: {template_name}")
+                break
+    
+    return matches
 
 def safe_cell_value(ws, row, col):
     """安全获取单元格值，处理合并单元格和数据清洗"""
@@ -179,7 +185,7 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
-    """处理文件上传和合并（原位覆盖模式）"""
+    """处理文件上传和合并（多工作表原位覆盖模式）"""
     if 'template' not in request.files or 'sources' not in request.files:
         return jsonify({'error': '请求中缺少模板文件或源文件'}), 400
     
@@ -218,9 +224,9 @@ def upload_files():
         # 复制模板文件
         shutil.copy(template_path, output_path)
         
-        # 加载工作簿
+        # 加载模板工作簿
         template_wb = load_workbook(output_path, read_only=False, data_only=True)
-        template_ws = template_wb.active
+        logger.info(f"模板文件包含工作表: {template_wb.sheetnames}")
         
         # 按顺序处理每个源文件（后处理的文件会覆盖先处理的文件）
         for file_index, source_path in enumerate(source_paths, 1):
@@ -228,31 +234,44 @@ def upload_files():
             try:
                 # 加载源文件
                 source_wb = load_workbook(source_path, read_only=False, data_only=True)
-                source_ws = source_wb.active
-                
                 logger.info(f"\n处理源文件 {file_index}/{len(source_paths)}: {source_filename}")
-                logger.info(f"复制列范围: {chr(64 + START_COLUMN)}列到{chr(64 + END_COLUMN)}列")
+                logger.info(f"源文件包含工作表: {source_wb.sheetnames}")
                 
-                # 循环复制E列到Z列 (5到26列)
-                total_copied = 0
-                for col_index in range(START_COLUMN, END_COLUMN + 1):
-                    col_name = chr(64 + col_index)
-                    copied_rows = copy_entire_column(source_ws, template_ws, col_index)
-                    total_copied += copied_rows
-                    logger.debug(f"  复制{col_name}列数据: {copied_rows} 行")
+                # 查找匹配的工作表
+                matching_sheets = find_matching_sheets(template_wb, source_wb)
                 
-                logger.info(f"  成功处理源文件: {source_filename} (共复制 {total_copied} 个单元格)")
+                if not matching_sheets:
+                    logger.warning(f"未找到匹配的工作表，跳过文件: {source_filename}")
+                    source_wb.close()
+                    continue
+                
+                # 处理每个匹配的工作表对
+                for template_ws, source_ws, sheet_name in matching_sheets:
+                    logger.info(f"处理工作表: {sheet_name}")
+                    
+                    # 循环复制E列到Z列 (5到26列)
+                    total_copied = 0
+                    for col_index in range(START_COLUMN, END_COLUMN + 1):
+                        col_name = chr(64 + col_index)
+                        copied_rows = copy_entire_column(source_ws, template_ws, col_index)
+                        total_copied += copied_rows
+                        logger.debug(f"  复制{col_name}列数据: {copied_rows} 行")
+                    
+                    logger.info(f"  工作表 {sheet_name} 处理完成: 共复制 {total_copied} 个单元格")
                 
                 # 关闭源文件
                 source_wb.close()
+                logger.info(f"成功处理源文件: {source_filename}")
                 
             except Exception as e:
                 logger.error(f"处理源文件 {source_filename} 失败: {str(e)}", exc_info=True)
                 return jsonify({'error': f'处理源文件 {source_filename} 时出错: {str(e)}'}), 500
         
-        # 确保工作表未受保护
-        if template_ws.protection.sheet:
-            template_ws.protection = Protection(sheet=False)
+        # 确保所有工作表未受保护
+        for sheet_name in template_wb.sheetnames:
+            ws = template_wb[sheet_name]
+            if ws.protection.sheet:
+                ws.protection = Protection(sheet=False)
         
         # 保存合并后的文件
         template_wb.save(output_path)
