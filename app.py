@@ -75,18 +75,9 @@ def find_sheet_by_name(workbook, target_name):
     return None
 
 def process_excel_files(template_path, source_files, output_path, config):
-    """
-    config = {
-        "sheet_names": ["Sheet1", "Data"],
-        "read_cols": [5, 6, 7],       # 列索引列表（从1开始）
-        "write_start_col": 5,
-        "data_start_row": 6,
-        "data_end_row": 50
-    }
-    """
     try:
-        shutil.copy(template_path, output_path)
-        wb_output = load_workbook(output_path)
+        # ✅ 直接加载模板，不再复制
+        wb_output = load_workbook(template_path)
 
         total_rows_written = 0
 
@@ -128,13 +119,19 @@ def process_excel_files(template_path, source_files, output_path, config):
             total_rows_written += sheet_rows_written
             print(f"工作表 [{sheet_name}] 写入 {sheet_rows_written} 行")
 
+        # ✅ 保存前检查权限
+        if not os.access(output_path, os.W_OK):
+            raise PermissionError(f"无法写入: {output_path}")
+
+        # ✅ 强制保存
         wb_output.save(output_path)
+        print(f"✅ 成功保存: {output_path}")
         return True, f"成功合并 {total_rows_written} 行数据"
+
     except Exception as e:
         import traceback
         traceback.print_exc()
         return False, f"处理失败: {str(e)}"
-
 # ================== Web 路由 ==================
 
 @app.route('/')
