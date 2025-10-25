@@ -1,5 +1,6 @@
 # app.py
 import os
+import tempfile
 from flask import Flask, request, render_template, send_file, jsonify, redirect, url_for
 from openpyxl import load_workbook
 import shutil
@@ -11,7 +12,8 @@ import re
 app = Flask(__name__)
 
 # 配置
-UPLOAD_FOLDER = 'uploads'
+UPLOAD_FOLDER = os.path.join(tempfile.gettempdir(), 'excel_merger_uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 这个目录在 /tmp 下，可写
 ALLOWED_EXTENSIONS = {'xlsx'}
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -213,6 +215,9 @@ def download_file(filename):
         return send_file(file_path, as_attachment=True)
     return "文件不存在", 404
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",           # 必须绑定 0.0.0.0
+        port=int(os.environ.get("PORT", 5000)),  # 必须读取 PORT 环境变量
+        debug=False               # 生产环境必须关闭 debug
+    )
