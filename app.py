@@ -8,6 +8,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify, send_file, render_template
 from openpyxl import load_workbook
 from openpyxl.styles import Protection
+from werkzeug.utils import secure_filename  # 添加缺失的导入
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {'xlsx'}
 
-# --------------------------- 从参考脚本整合的Excel处理函数 ---------------------------
+# --------------------------- Excel处理函数 ---------------------------
 def try_parse_date(date_str):
     """尝试解析日期字符串"""
     if not isinstance(date_str, str):
@@ -42,11 +43,10 @@ def try_parse_date(date_str):
     return None
 
 def find_sheet_by_name(workbook, target_name):
-    """通过名称模糊查找工作表（不区分大小写和空格）"""
-    # 创建灵活的匹配模式
+    """通过名称模糊查找工作表"""
     target_pattern = re.compile(r'\s*'.join(re.escape(part) for part in target_name.split()), re.IGNORECASE)
     
-    # 精确匹配（移除所有空格后比较）
+    # 精确匹配
     clean_target = re.sub(r'\s+', '', target_name).lower()
     for sheet_name in workbook.sheetnames:
         clean_name = re.sub(r'\s+', '', sheet_name).lower()
@@ -69,7 +69,6 @@ def safe_cell_value(ws, row, col):
         if ws.merged_cells:
             for merged_range in ws.merged_cells.ranges:
                 if cell.coordinate in merged_range:
-                    # 返回合并区域左上角单元格的值
                     top_left_cell = ws.cell(
                         row=merged_range.min_row,
                         column=merged_range.min_col
@@ -114,7 +113,7 @@ def unmerge_cells_if_merged(ws, cell_coord):
         logger.error(f"解除合并单元格失败: {str(e)}")
         return False
 
-# --------------------------- 原有功能函数 ---------------------------
+# --------------------------- 辅助函数 ---------------------------
 def allowed_file(filename):
     """检查文件是否为允许的类型"""
     return '.' in filename and \
@@ -132,7 +131,6 @@ def cleanup_temp_files():
             except Exception as e:
                 logger.error(f"清理临时文件失败: {str(e)}")
 
-# 注册退出时清理函数
 atexit.register(cleanup_temp_files)
 
 # --------------------------- Flask路由 ---------------------------
@@ -199,14 +197,14 @@ def upload_files():
                 source_wb = load_workbook(source_path, read_only=False, data_only=True)
                 source_ws = source_wb.active
                 
-                # 使用参考脚本的safe_cell_value读取数据
+                # 读取数据
                 e_value = safe_cell_value(source_ws, 1, 5)  # E1 (第1行第5列)
                 f_value = safe_cell_value(source_ws, 1, 6)  # F1 (第1行第6列)
                 g_value = safe_cell_value(source_ws, 1, 7)  # G1 (第1行第7列)
                 
                 logger.info(f"读取源文件 {source_filename} 的值 - E1: {e_value}, F1: {f_value}, G1: {g_value}")
                 
-                # 处理模板文件中的目标单元格（解除合并）
+                # 处理模板文件中的目标单元格
                 target_cells = [f'E{row_index}', f'F{row_index}', f'G{row_index}']
                 for cell_coord in target_cells:
                     unmerge_cells_if_merged(template_ws, cell_coord)
