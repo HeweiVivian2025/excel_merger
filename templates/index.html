@@ -1,0 +1,80 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Excel 多文件合并工具</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; max-width: 800px; margin: auto; }
+    .form-group { margin: 15px 0; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input, button { padding: 8px; margin: 5px 0; }
+    input[type="text"] { width: 100%; }
+    button { background: #007BFF; color: white; border: none; cursor: pointer; padding: 10px 20px; }
+    button:hover { background: #0056b3; }
+    .result { margin-top: 20px; padding: 10px; border: 1px solid #ddd; }
+    .error { color: red; }
+    .success { color: green; }
+  </style>
+</head>
+<body>
+  <h1>📊 Excel 多文件合并工具</h1>
+  <p>将多个结构相同的 Excel 文件内容合并到模板中。</p>
+
+  <form id="uploadForm" enctype="multipart/form-data">
+    <div class="form-group">
+      <label>模板文件 (.xlsx)</label>
+      <input type="file" name="template" accept=".xlsx" required />
+    </div>
+
+    <div class="form-group">
+      <label>数据源文件 (.xlsx, 可多选)</label>
+      <input type="file" name="sources" accept=".xlsx" multiple required />
+    </div>
+
+    <div class="form-group">
+      <label>工作表名称 (多个用英文逗号分隔)</label>
+      <input type="text" name="sheet_names" placeholder="PRC MFG Monthly Fixed CA & KPI, VN MFG..." required />
+    </div>
+
+    <div class="form-group">
+      <label>读取列 (列号，如: 5,6,7 表示 E,F,G)</label>
+      <input type="text" name="read_cols" value="5,6,7" placeholder="5,6,7" />
+    </div>
+
+    <div class="form-group">
+      <label>写入起始列 (列号，如: 5 表示 E 列)</label>
+      <input type="text" name="write_start_col" value="5" />
+    </div>
+
+    <div class="form-group">
+      <label>数据起始行</label>
+      <input type="text" name="data_start_row" value="6" />
+    </div>
+
+    <div class="form-group">
+      <label>数据结束行</label>
+      <input type="text" name="data_end_row" value="50" />
+    </div>
+
+    <button type="submit">上传并合并</button>
+  </form>
+
+  <div id="result"></div>
+
+  <script>
+    document.getElementById('uploadForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const res = await fetch('/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = `<div class="result ${data.success ? 'success' : 'error'}">
+        ${data.message}
+        ${data.download_url ? `<br><a href="${data.download_url}" target="_blank">📥 点击下载合并文件</a>` : ''}
+      </div>`;
+    };
+  </script>
+</body>
+</html>
