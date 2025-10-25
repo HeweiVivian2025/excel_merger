@@ -51,7 +51,7 @@ def safe_cell_value(ws, row, col):
             return None
         if isinstance(value, str):
             value = value.strip()
-            if value in ["", "NONE", "#N/A", "NULL", "#VALUE!", "#REF!"]:
+            if value in ["", "NONE", "#N/A", "NULL", "#VALUE!", "#REF!", "#DIV/0!", "#NAME?", "#NUM!"]:
                 return None
             parsed_date = try_parse_date(value)
             if parsed_date:
