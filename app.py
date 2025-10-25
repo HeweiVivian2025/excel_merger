@@ -1,88 +1,37 @@
-# app.py
 import os
 import tempfile
-from flask import Flask, request, render_template, send_file, jsonify
-from openpyxl import load_workbook
-from werkzeug.utils import secure_filename
-from datetime import datetime
-import uuid
-import re
 import shutil
+from flask import Flask, request, jsonify, render_template, send_file, abort
+from openpyxl import load_workbook
+from datetime import datetime
 
 app = Flask(__name__)
 
-# 配置
-UPLOAD_FOLDER = os.path.join(tempfile.gettempdir(), 'excel_merger_uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# 配置上传目录
+app.config['UPLOAD_FOLDER'] = '/tmp/excel_merger_uploads'
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-ALLOWED_EXTENSIONS = {'xlsx'}
-MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
-
-# 确保上传目录存在
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def try_parse_date(date_str):
-    if not isinstance(date_str, str):
-        return None
-    date_str = date_str.strip()
-    formats = ["%Y/%m/%d", "%Y-%m-%d", "%m/%d/%Y", "%Y年%m月%d日"]
-    for fmt in formats:
-        try:
-            return datetime.strptime(date_str, fmt).date()
-        except ValueError:
-            continue
+def find_sheet_by_name(wb, sheet_name):
+    for sheet in wb.sheetnames:
+        if sheet == sheet_name:
+            return wb[sheet]
     return None
-
 
 def safe_cell_value(ws, row, col):
-    try:
-        cell = ws.cell(row=row, column=col)
-        if ws.merged_cells:
-            for merged_range in ws.merged_cells.ranges:
-                if cell.coordinate in merged_range:
-                    return ws.cell(merged_range.min_row, merged_range.min_col).value
-        value = cell.value
-        if value is None or value == "":
-            return None
-        if isinstance(value, str):
-            value = value.strip()
-            if value in ["", "NONE", "#N/A", "NULL", "#VALUE!", "#REF!", "#DIV/0!", "#NAME?", "#NUM!"]:
-                return None
-            parsed_date = try_parse_date(value)
-            if parsed_date:
-                return parsed_date
-        return value
-    except Exception:
-        return None
-
+    cell = ws.cell(row=row, column=col)
+    if cell.value is None:
+        return ""
+    return str(cell.value)
 
 def has_row_data(ws, row, cols):
-    return any(safe_cell_value(ws, row, col) not in [None, ""] for col in cols)
-
-
-def find_sheet_by_name(workbook, target_name):
-    clean_target = re.sub(r'\s+', '', target_name.lower())
-    for name in workbook.sheetnames:
-        if re.sub(r'\s+', '', name.lower()) == clean_target:
-            return workbook[name]
-    # 模糊匹配
-    for name in workbook.sheetnames:
-        if target_name.lower() in name.lower():
-            return workbook[name]
-    return None
-
+    for col in cols:
+        cell = ws.cell(row=row, column=col)
+        if cell.value not in [None, "", "#DIV/0!"]:
+            return True
+    return False
 
 def process_excel_files(template_path, source_files, output_path, config):
     try:
-        # 直接加载模板（不复制）
         wb_output = load_workbook(template_path)
         total_rows_written = 0
 
@@ -92,7 +41,17 @@ def process_excel_files(template_path, source_files, output_path, config):
                 print(f"⚠️ 未找到模板中的工作表: {sheet_name}")
                 continue
 
-            sheet_rows_written = 0
+            # 解除保护和锁定
+            if ws_template.protection.sheet:
+                try:
+                    ws_template.protection.disable()
+                except:
+                    pass
+
+            for row in ws_template.iter_rows():
+                for cell in row:
+                    cell.protection = None
+
             for src_path in source_files:
                 try:
                     wb_src = load_workbook(src_path, data_only=True)
@@ -112,20 +71,18 @@ def process_excel_files(template_path, source_files, output_path, config):
                                 continue
                             write_col = config["write_start_col"] + offset
                             try:
-                                ws_template.cell(row=row, column=write_col).value = val
+                                target_cell = ws_template.cell(row=row, column=write_col)
+                                target_cell.value = val
+                                target_cell.protection = None
                                 print(f"📝 写入 R{row}C{write_col} = {val}")
                             except Exception as e:
                                 print(f"❌ 写入失败 R{row}C{write_col}: {e}")
 
-                        sheet_rows_written += 1
+                        total_rows_written += 1
                     wb_src.close()
                 except Exception as e:
                     print(f"❌ 处理源文件失败: {src_path}, 错误: {e}")
 
-            total_rows_written += sheet_rows_written
-            print(f"✅ 工作表 [{sheet_name}] 写入 {sheet_rows_written} 行")
-
-        # 保存到临时路径
         wb_output.save(output_path)
         print(f"✅ 成功保存合并文件: {output_path}")
         return True, f"成功合并 {total_rows_written} 行数据"
@@ -136,106 +93,85 @@ def process_excel_files(template_path, source_files, output_path, config):
         print(f"❌ 处理失败: {str(e)}")
         return False, f"处理失败: {str(e)}"
 
-
-# ================== Web 路由 ==================
-
 @app.route('/')
 def index():
     return render_template('index.html')
 
-
 @app.route('/upload', methods=['POST'])
 def upload_files():
-    if 'template' not in request.files or 'sources' not in request.files:
-        return jsonify({'success': False, 'message': '请上传模板和源文件'})
-
-    template_file = request.files['template']
-    source_files = request.files.getlist('sources')
-
-    if template_file.filename == '' or not allowed_file(template_file.filename):
-        return jsonify({'success': False, 'message': '请上传有效的模板文件 (.xlsx)'})
-
-    if not source_files or all(f.filename == '' for f in source_files):
-        return jsonify({'success': False, 'message': '请上传至少一个源文件'})
-
-    valid_sources = [f for f in source_files if f.filename != '' and allowed_file(f.filename)]
-    if not valid_sources:
-        return jsonify({'success': False, 'message': '没有有效的源文件'})
-
     try:
+        template_file = request.files.get('template')
+        source_files = request.files.getlist('sources')
+        sheet_names = request.form.get('sheet_names').split(',')
+        read_cols = list(map(int, request.form.get('read_cols').split(',')))
+        write_start_col = int(request.form.get('write_start_col'))
+        data_start_row = int(request.form.get('data_start_row'))
+        data_end_row = int(request.form.get('data_end_row'))
+
+        if not template_file or len(source_files) == 0:
+            return jsonify({'success': False, 'message': '请上传模板和数据源文件'})
+
         # 保存模板
-        template_filename = secure_filename(template_file.filename)
-        template_path = os.path.join(app.config['UPLOAD_FOLDER'], template_filename)
+        template_path = os.path.join(app.config['UPLOAD_FOLDER'], template_file.filename)
         template_file.save(template_path)
 
         # 保存源文件
         source_paths = []
-        for f in valid_sources:
-            src_filename = secure_filename(f.filename)
-            src_path = os.path.join(app.config['UPLOAD_FOLDER'], src_filename)
-            f.save(src_path)
+        for src_file in source_files:
+            src_path = os.path.join(app.config['UPLOAD_FOLDER'], src_file.filename)
+            src_file.save(src_path)
             source_paths.append(src_path)
 
-        # 读取用户配置
-        config = {
-            "sheet_names": [name.strip() for name in request.form.get('sheet_names', '').split(',') if name.strip()],
-            "read_cols": [int(x) for x in request.form.get('read_cols', '5,6,7').split(',')],
-            "write_start_col": int(request.form.get('write_start_col', 5)),
-            "data_start_row": int(request.form.get('data_start_row', 6)),
-            "data_end_row": int(request.form.get('data_end_row', 50))
-        }
-
-        if not config["sheet_names"]:
-            return jsonify({'success': False, 'message': '请填写工作表名称'})
-
-        # 输出文件名
-        base_name = os.path.splitext(template_filename)[0]
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        random_suffix = str(uuid.uuid4())[:8]
-        output_filename = f"{base_name}_merged_{timestamp}_{random_suffix}.xlsx"
-
-        # ✅ 使用 NamedTemporaryFile 创建临时文件（避免 /tmp 权限问题）
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
-            temp_output_path = tmp_file.name
+        # 生成输出文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        output_filename = f"{template_file.filename.split('.')[0]}_merged_{timestamp}.xlsx"
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
 
         # 处理合并
-        success, message = process_excel_files(template_path, source_paths, temp_output_path, config)
+        config = {
+            "sheet_names": sheet_names,
+            "read_cols": read_cols,
+            "write_start_col": write_start_col,
+            "data_start_row": data_start_row,
+            "data_end_row": data_end_row
+        }
+
+        success, message = process_excel_files(template_path, source_paths, output_path, config)
 
         if success:
-            # 将临时文件移动到上传目录
-            final_output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
-            shutil.move(temp_output_path, final_output_path)
+            # ✅ 使用 copy 确保文件存在
+            try:
+                shutil.copy(output_path, output_path)  # 确保文件可读
+                print(f"✅ 输出文件已保存: {output_path}")
+            except Exception as e:
+                print(f"❌ 复制失败: {e}")
 
-            # ✅ 使用 request.url_root 替代 url_for
             download_url = request.url_root.rstrip('/') + '/download/' + output_filename
-
             return jsonify({
                 'success': True,
                 'message': message,
                 'download_url': download_url
             })
         else:
-            # 删除临时文件
-            if os.path.exists(temp_output_path):
-                os.unlink(temp_output_path)
             return jsonify({'success': False, 'message': message})
 
     except Exception as e:
-        print(f"❌ 上传错误: {e}")
-        return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'})
-
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'上传失败: {str(e)}'})
 
 @app.route('/download/<filename>')
 def download_file(filename):
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True)
-    return "文件不存在", 404
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+    else:
+        abort(404)
 
-
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-        debug=False
-    )
+if __name__ == '__main__':
+    app.run(debug=True)
