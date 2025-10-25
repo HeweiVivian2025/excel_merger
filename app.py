@@ -1,19 +1,20 @@
 # app.py
 import os
 import tempfile
-from flask import Flask, request, render_template, send_file, jsonify, redirect, url_for
+from flask import Flask, request, render_template, send_file, jsonify
 from openpyxl import load_workbook
-import shutil
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import uuid
 import re
+import shutil
 
 app = Flask(__name__)
 
 # 配置
 UPLOAD_FOLDER = os.path.join(tempfile.gettempdir(), 'excel_merger_uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 这个目录在 /tmp 下，可写
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 ALLOWED_EXTENSIONS = {'xlsx'}
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -23,9 +24,10 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
 # 确保上传目录存在
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 允许的文件类型
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 def try_parse_date(date_str):
     if not isinstance(date_str, str):
@@ -38,6 +40,7 @@ def try_parse_date(date_str):
         except ValueError:
             continue
     return None
+
 
 def safe_cell_value(ws, row, col):
     try:
@@ -60,8 +63,10 @@ def safe_cell_value(ws, row, col):
     except Exception:
         return None
 
+
 def has_row_data(ws, row, cols):
     return any(safe_cell_value(ws, row, col) not in [None, ""] for col in cols)
+
 
 def find_sheet_by_name(workbook, target_name):
     clean_target = re.sub(r'\s+', '', target_name.lower())
@@ -74,17 +79,17 @@ def find_sheet_by_name(workbook, target_name):
             return workbook[name]
     return None
 
+
 def process_excel_files(template_path, source_files, output_path, config):
     try:
-        # ✅ 直接加载模板，不再复制
+        # 直接加载模板（不复制）
         wb_output = load_workbook(template_path)
-
         total_rows_written = 0
 
         for sheet_name in config["sheet_names"]:
             ws_template = find_sheet_by_name(wb_output, sheet_name)
             if not ws_template:
-                print(f"未找到模板中的工作表: {sheet_name}")
+                print(f"⚠️ 未找到模板中的工作表: {sheet_name}")
                 continue
 
             sheet_rows_written = 0
@@ -93,7 +98,7 @@ def process_excel_files(template_path, source_files, output_path, config):
                     wb_src = load_workbook(src_path, data_only=True)
                     ws_src = find_sheet_by_name(wb_src, sheet_name)
                     if not ws_src:
-                        print(f"源文件中无此工作表: {sheet_name} in {src_path}")
+                        print(f"⚠️ 源文件中无此工作表: {sheet_name} in {src_path}")
                         wb_src.close()
                         continue
 
@@ -108,35 +113,36 @@ def process_excel_files(template_path, source_files, output_path, config):
                             write_col = config["write_start_col"] + offset
                             try:
                                 ws_template.cell(row=row, column=write_col).value = val
+                                print(f"📝 写入 R{row}C{write_col} = {val}")  # 调试日志
                             except Exception as e:
-                                print(f"写入失败 R{row}C{write_col}: {e}")
+                                print(f"❌ 写入失败 R{row}C{write_col}: {e}")
 
                         sheet_rows_written += 1
                     wb_src.close()
                 except Exception as e:
-                    print(f"处理源文件失败: {src_path}, 错误: {e}")
+                    print(f"❌ 处理源文件失败: {src_path}, 错误: {e}")
 
             total_rows_written += sheet_rows_written
-            print(f"工作表 [{sheet_name}] 写入 {sheet_rows_written} 行")
+            print(f"✅ 工作表 [{sheet_name}] 写入 {sheet_rows_written} 行")
 
-        # ✅ 保存前检查权限
-        if not os.access(output_path, os.W_OK):
-            raise PermissionError(f"无法写入: {output_path}")
-
-        # ✅ 强制保存
+        # 保存到临时路径
         wb_output.save(output_path)
-        print(f"✅ 成功保存: {output_path}")
+        print(f"✅ 成功保存合并文件: {output_path}")
         return True, f"成功合并 {total_rows_written} 行数据"
 
     except Exception as e:
         import traceback
         traceback.print_exc()
+        print(f"❌ 处理失败: {str(e)}")
         return False, f"处理失败: {str(e)}"
+
+
 # ================== Web 路由 ==================
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
@@ -170,10 +176,10 @@ def upload_files():
             f.save(src_path)
             source_paths.append(src_path)
 
-        # 读取用户配置（前端传入）
+        # 读取用户配置
         config = {
             "sheet_names": [name.strip() for name in request.form.get('sheet_names', '').split(',') if name.strip()],
-            "read_cols": [int(x) for x in request.form.get('read_cols', '5,6,7').split(',')],  # 默认 E,F,G
+            "read_cols": [int(x) for x in request.form.get('read_cols', '5,6,7').split(',')],
             "write_start_col": int(request.form.get('write_start_col', 5)),
             "data_start_row": int(request.form.get('data_start_row', 6)),
             "data_end_row": int(request.form.get('data_end_row', 50))
@@ -187,23 +193,33 @@ def upload_files():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         random_suffix = str(uuid.uuid4())[:8]
         output_filename = f"{base_name}_merged_{timestamp}_{random_suffix}.xlsx"
-        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+
+        # ✅ 使用 NamedTemporaryFile 创建临时文件（避免 /tmp 权限问题）
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
+            temp_output_path = tmp_file.name
 
         # 处理合并
-        success, message = process_excel_files(template_path, source_paths, output_path, config)
+        success, message = process_excel_files(template_path, source_paths, temp_output_path, config)
 
         if success:
+            # 将临时文件移动到上传目录
+            final_output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+            shutil.move(temp_output_path, final_output_path)
             return jsonify({
                 'success': True,
                 'message': message,
                 'download_url': url_for('download_file', filename=output_filename)
             })
         else:
+            # 删除临时文件
+            if os.path.exists(temp_output_path):
+                os.unlink(temp_output_path)
             return jsonify({'success': False, 'message': message})
 
     except Exception as e:
-        print(f"上传错误: {e}")
+        print(f"❌ 上传错误: {e}")
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'})
+
 
 @app.route('/download/<filename>')
 def download_file(filename):
@@ -212,9 +228,10 @@ def download_file(filename):
         return send_file(file_path, as_attachment=True)
     return "文件不存在", 404
 
+
 if __name__ == "__main__":
     app.run(
-        host="0.0.0.0",           # 必须绑定 0.0.0.0
-        port=int(os.environ.get("PORT", 5000)),  # 必须读取 PORT 环境变量
-        debug=False               # 生产环境必须关闭 debug
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=False
     )
