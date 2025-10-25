@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify, send_file, render_template
 from openpyxl import load_workbook
 from openpyxl.styles import Protection
-from werkzeug.utils import secure_filename  # 添加缺失的导入
+from werkzeug.utils import secure_filename
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -113,6 +113,36 @@ def unmerge_cells_if_merged(ws, cell_coord):
         logger.error(f"解除合并单元格失败: {str(e)}")
         return False
 
+def copy_entire_column(source_ws, target_ws, col_index, start_row=1, end_row=None):
+    """
+    复制整列数据到目标工作表的对应列（原位覆盖）
+    
+    :param source_ws: 源工作表
+    :param target_ws: 目标工作表
+    :param col_index: 列索引 (1-based)
+    :param start_row: 开始行号
+    :param end_row: 结束行号，None表示复制所有行
+    :return: 复制的行数
+    """
+    if end_row is None:
+        end_row = source_ws.max_row  # 仅以源文件行数为准
+        
+    copied_rows = 0
+    for row in range(start_row, end_row + 1):
+        # 读取源单元格值
+        value = safe_cell_value(source_ws, row, col_index)
+        
+        if value is not None:
+            # 解除目标单元格合并状态
+            target_cell_coord = f"{chr(64 + col_index)}{row}"  # 例如：E2
+            unmerge_cells_if_merged(target_ws, target_cell_coord)
+            
+            # 写入目标单元格（同位置覆盖）
+            target_ws.cell(row=row, column=col_index, value=value)
+            copied_rows += 1
+    
+    return copied_rows
+
 # --------------------------- 辅助函数 ---------------------------
 def allowed_file(filename):
     """检查文件是否为允许的类型"""
@@ -145,7 +175,7 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
-    """处理文件上传和合并"""
+    """处理文件上传和合并（原位覆盖模式）"""
     if 'template' not in request.files or 'sources' not in request.files:
         return jsonify({'error': '请求中缺少模板文件或源文件'}), 400
     
@@ -187,38 +217,32 @@ def upload_files():
         # 加载工作簿
         template_wb = load_workbook(output_path, read_only=False, data_only=True)
         template_ws = template_wb.active
-        row_index = 2  # 从第2行开始写入数据
         
-        # 处理每个源文件
-        for source_path in source_paths:
+        # 按顺序处理每个源文件（后处理的文件会覆盖先处理的文件）
+        for file_index, source_path in enumerate(source_paths, 1):
             source_filename = os.path.basename(source_path)
             try:
                 # 加载源文件
                 source_wb = load_workbook(source_path, read_only=False, data_only=True)
                 source_ws = source_wb.active
                 
-                # 读取数据
-                e_value = safe_cell_value(source_ws, 1, 5)  # E1 (第1行第5列)
-                f_value = safe_cell_value(source_ws, 1, 6)  # F1 (第1行第6列)
-                g_value = safe_cell_value(source_ws, 1, 7)  # G1 (第1行第7列)
+                logger.info(f"\n处理源文件 {file_index}/{len(source_paths)}: {source_filename}")
                 
-                logger.info(f"读取源文件 {source_filename} 的值 - E1: {e_value}, F1: {f_value}, G1: {g_value}")
+                # 复制E列 (第5列)
+                copied_rows = copy_entire_column(source_ws, template_ws, 5)
+                logger.info(f"  复制E列数据: {copied_rows} 行")
                 
-                # 处理模板文件中的目标单元格
-                target_cells = [f'E{row_index}', f'F{row_index}', f'G{row_index}']
-                for cell_coord in target_cells:
-                    unmerge_cells_if_merged(template_ws, cell_coord)
+                # 复制F列 (第6列)
+                copied_rows = copy_entire_column(source_ws, template_ws, 6)
+                logger.info(f"  复制F列数据: {copied_rows} 行")
                 
-                # 写入模板文件
-                template_ws[f'E{row_index}'] = e_value if e_value is not None else ''
-                template_ws[f'F{row_index}'] = f_value if f_value is not None else ''
-                template_ws[f'G{row_index}'] = g_value if g_value is not None else ''
-                
-                row_index += 1
-                logger.info(f"成功处理源文件: {source_filename}")
+                # 复制G列 (第7列)
+                copied_rows = copy_entire_column(source_ws, template_ws, 7)
+                logger.info(f"  复制G列数据: {copied_rows} 行")
                 
                 # 关闭源文件
                 source_wb.close()
+                logger.info(f"  成功处理源文件: {source_filename} (后处理文件将覆盖此文件数据)")
                 
             except Exception as e:
                 logger.error(f"处理源文件 {source_filename} 失败: {str(e)}", exc_info=True)
@@ -230,9 +254,8 @@ def upload_files():
         
         # 保存合并后的文件
         template_wb.save(output_path)
-        logger.info(f"成功保存合并文件: {output_path}")
+        logger.info(f"\n成功保存合并文件: {output_path}")
         
-        # 验证文件是否存在
         if not os.path.exists(output_path):
             raise Exception("合并文件保存后不存在")
             
