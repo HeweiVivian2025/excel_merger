@@ -113,7 +113,7 @@ def process_excel_files(template_path, source_files, output_path, config):
                             write_col = config["write_start_col"] + offset
                             try:
                                 ws_template.cell(row=row, column=write_col).value = val
-                                print(f"📝 写入 R{row}C{write_col} = {val}")  # 调试日志
+                                print(f"📝 写入 R{row}C{write_col} = {val}")
                             except Exception as e:
                                 print(f"❌ 写入失败 R{row}C{write_col}: {e}")
 
@@ -205,10 +205,14 @@ def upload_files():
             # 将临时文件移动到上传目录
             final_output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
             shutil.move(temp_output_path, final_output_path)
+
+            # ✅ 使用 request.url_root 替代 url_for
+            download_url = request.url_root.rstrip('/') + '/download/' + output_filename
+
             return jsonify({
                 'success': True,
                 'message': message,
-                'download_url': url_for('download_file', filename=output_filename)
+                'download_url': download_url
             })
         else:
             # 删除临时文件
